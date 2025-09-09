@@ -1,4 +1,4 @@
-# 修正版（クォートエスケープ無し）
+# English Axis Titles Version
 
 pip install -r requirements.txt
 

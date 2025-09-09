@@ -183,11 +183,11 @@ with tab_view:
                 fig = plt.figure(figsize=(12,6))
                 for ymd, row in pivot.iterrows():
                     plt.plot(ordered_cols, row.values, label=ymd)
-                plt.title('日毎の使用実績（30分値）')
-                plt.xlabel('時刻')
-                plt.ylabel('使用量')
+                plt.title('Daily Usage (30-min Interval)')
+                plt.xlabel('Time of Day')
+                plt.ylabel('Usage')
                 plt.xticks(rotation=45)
-                plt.legend(title='日付', bbox_to_anchor=(1.02,1), loc='upper left')
+                plt.legend(title='Date', bbox_to_anchor=(1.02,1), loc='upper left')
                 plt.tight_layout()
                 st.pyplot(fig)
                 with st.expander('データプレビュー（縦持ち）'):
