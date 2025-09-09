@@ -92,16 +92,15 @@ def wide_to_long(df: pd.DataFrame) -> pd.DataFrame:
     if not date_col_candidates:
         for c in df.columns:
             v = str(df[c].iloc[0])
-            import re as _re
-            if _re.match(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}", v):
+            if re.match(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}", v):
                 date_col_candidates = [c]
                 break
     if not date_col_candidates:
-        raise ValueError("日付列（例：'YYYY/MM/DD'）が見つかりませんでした。")
+        raise ValueError("Date column (e.g., 'YYYY/MM/DD') not found.")
     date_col = date_col_candidates[0]
-    time_cols = [c for c in df.columns if __import__("re").fullmatch(r"\d{1,2}:\d{2}", str(c))]
+    time_cols = [c for c in df.columns if re.fullmatch(r"\d{1,2}:\d{2}", str(c))]
     if len(time_cols) == 0:
-        raise ValueError("時刻列（例：'0:00'～'23:30'）が見つかりませんでした。")
+        raise ValueError("Time columns (e.g., '0:00'..'23:30') not found.")
     keep = [date_col] + time_cols
     df2 = df[keep].copy()
     df2[date_col] = pd.to_datetime(df2[date_col]).dt.strftime('%Y-%m-%d')
@@ -122,76 +121,86 @@ def pick_jp_font():
     return None
 
 # ---------- UI ----------
-st.set_page_config(page_title='30分値 見える化', layout='wide')
-st.title('30分毎の使用実績 見える化（DB永続化）')
+st.set_page_config(page_title='30-min Usage Viewer', layout='wide')
+st.title('Daily Usage (30-min Interval) — DB-backed')
 
 con = init_db()
 pick_jp_font()
 
-tab_upload, tab_view = st.tabs(['データ登録（アップロード）', '可視化'])
+tab_upload, tab_view = st.tabs(['Upload to DB', 'Visualization'])
 
 with tab_upload:
-    st.markdown('#### CSV/Excel を登録（DBへ保存）')
-    file = st.file_uploader('ファイルを選択（CSV または Excel）', type=['csv','xlsx','xls'])
+    st.markdown('#### Register CSV/Excel (saved to DB)')
+    file = st.file_uploader('Choose a file (CSV or Excel)', type=['csv','xlsx','xls'])
     if file is not None:
         try:
             df = load_table(file)
-            st.write('先頭プレビュー：', df.head())
+            st.write('Head:', df.head())
             long_df = wide_to_long(df)
-            st.write('整形後（縦持ち）：', long_df.head())
-            if st.button('DBへ登録する'):
+            st.write('Long-format preview:', long_df.head())
+            if st.button('Save into DB'):
                 file_id = insert_file(con, file.name)
                 upsert_readings(con, file_id, long_df)
-                st.success(f'登録完了: file_id={file_id}, 追加行数={len(long_df)}')
+                st.success(f'Saved: file_id={file_id}, rows={len(long_df)}')
         except Exception as e:
-            st.error(f'取り込みに失敗しました: {e}')
+            st.error(f'Import failed: {e}')
     st.markdown('---')
-    st.markdown('#### 登録済みファイル')
+    st.markdown('#### Registered files')
     files_df = list_files(con)
     if len(files_df)==0:
-        st.info('まだ登録はありません。')
+        st.info('No files yet.')
     else:
         st.dataframe(files_df, use_container_width=True)
 
 with tab_view:
     files_df = list_files(con)
     if len(files_df)==0:
-        st.info('まずは「データ登録」タブでファイルを登録してください。')
+        st.info('Please upload a file first in the "Upload to DB" tab.')
     else:
         file_opts = {f"{row['id']}: {row['source_name']}": int(row['id']) for _, row in files_df.iterrows()}
-        sel_label = st.selectbox('対象ファイルを選択', list(file_opts.keys()))
+        sel_label = st.selectbox('Select file', list(file_opts.keys()))
         file_id = file_opts[sel_label]
         dates = list_dates(con, file_id)
         if len(dates)==0:
-            st.warning('このファイルには有効な日付データがありません。')
+            st.warning('No date rows in this file.')
         else:
+            # ---- SAFE DEFAULTS ----
+            start_date, end_date = None, None
+            unit_option = 'kWh (30min)'
+            df_range = pd.DataFrame()
+
             c1, c2, c3 = st.columns(3)
             with c1:
-                start_date = st.selectbox('開始日', dates, index=0)
+                start_date = st.selectbox('Start Date', dates, index=0)
             with c2:
-                end_date = st.selectbox('終了日', dates, index=len(dates)-1)
-            if start_date > end_date:
-                st.error('開始日が終了日より後になっています。')
-            else:
+                end_date = st.selectbox('End Date', dates, index=len(dates)-1)
+            with c3:
+                unit_option = st.radio('Unit', ['kWh (30min)', 'kW'], index=0)
+
+            if start_date and end_date and start_date > end_date:
+                st.error('Start Date is after End Date.')
+            elif start_date and end_date:
                 df_range = read_range(con, file_id, start_date, end_date)
-                # convert to kW if selected (kWh per 30min -> kW is *2)
                 if unit_option == 'kW':
                     df_range['usage'] = df_range['usage'] * 2
                 pivot = df_range.pivot_table(index='ymd', columns='hhmm', values='usage', aggfunc='mean')
                 def time_key(t):
                     h, m = t.split(':')
                     return int(h)*60 + int(m)
-                ordered_cols = sorted(pivot.columns, key=time_key)
-                pivot = pivot[ordered_cols]
-                fig = plt.figure(figsize=(12,6))
-                for ymd, row in pivot.iterrows():
-                    plt.plot(ordered_cols, row.values, label=ymd)
-                plt.title('Daily Usage (30-min Interval)')
-                plt.xlabel('Time of Day')
-                plt.ylabel('Energy [kWh/30min]' if unit_option == 'kWh (30min)' else 'Power [kW]')
-                plt.xticks(rotation=45)
-                plt.legend(title='Date', bbox_to_anchor=(1.02,1), loc='upper left')
-                plt.tight_layout()
-                st.pyplot(fig)
-                with st.expander('データプレビュー（縦持ち）'):
+                ordered_cols = sorted(pivot.columns, key=time_key) if len(pivot.columns) else []
+                if ordered_cols:
+                    pivot = pivot[ordered_cols]
+                    fig = plt.figure(figsize=(12,6))
+                    for ymd, row in pivot.iterrows():
+                        plt.plot(ordered_cols, row.values, label=ymd)
+                    plt.title('Daily Usage (30-min Interval)')
+                    plt.xlabel('Time of Day')
+                    plt.ylabel('Energy [kWh/30min]' if unit_option=='kWh (30min)' else 'Power [kW]')
+                    plt.xticks(rotation=45)
+                    plt.legend(title='Date', bbox_to_anchor=(1.02,1), loc='upper left')
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                else:
+                    st.info('No time columns to plot for the selected range.')
+                with st.expander('Data preview (long)'):
                     st.dataframe(df_range.head(200), use_container_width=True)
