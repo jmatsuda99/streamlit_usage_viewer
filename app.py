@@ -165,7 +165,7 @@ with tab_view:
         if len(dates)==0:
             st.warning('このファイルには有効な日付データがありません。')
         else:
-            c1, c2 = st.columns(2)
+            c1, c2, c3 = st.columns(3)
             with c1:
                 start_date = st.selectbox('開始日', dates, index=0)
             with c2:
@@ -174,6 +174,9 @@ with tab_view:
                 st.error('開始日が終了日より後になっています。')
             else:
                 df_range = read_range(con, file_id, start_date, end_date)
+                # convert to kW if selected (kWh per 30min -> kW is *2)
+                if unit_option == 'kW':
+                    df_range['usage'] = df_range['usage'] * 2
                 pivot = df_range.pivot_table(index='ymd', columns='hhmm', values='usage', aggfunc='mean')
                 def time_key(t):
                     h, m = t.split(':')
@@ -185,7 +188,7 @@ with tab_view:
                     plt.plot(ordered_cols, row.values, label=ymd)
                 plt.title('Daily Usage (30-min Interval)')
                 plt.xlabel('Time of Day')
-                plt.ylabel('Usage')
+                plt.ylabel('Energy [kWh/30min]' if unit_option == 'kWh (30min)' else 'Power [kW]')
                 plt.xticks(rotation=45)
                 plt.legend(title='Date', bbox_to_anchor=(1.02,1), loc='upper left')
                 plt.tight_layout()
