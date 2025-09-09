@@ -1,4 +1,4 @@
-# Safe defaults version (prevents NameError on unit_option/start/end)
+# Adds Daily/Monthly average trend charts with unit toggle (kWh/kW)
 
 pip install -r requirements.txt
 
